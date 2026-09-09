@@ -19,6 +19,10 @@
 
 首次本地构建后直接打开即可。应用使用临时签名，适合当前 Mac 自用，不是 App Store 发布包。
 
+## 分享给朋友
+
+运行 `build-dmg.sh` 后，将生成的 `Codex余量-版本号.dmg` 发给朋友。DMG 中包含应用、Applications 快捷入口和中文安装说明。当前测试版使用临时签名，朋友首次打开时需要在“系统设置 → 隐私与安全性”中选择“仍要打开”。要消除这一步，需要使用 Developer ID Application 证书签名并提交 Apple 公证。
+
 ## 开发
 
 要求 macOS 13 或更高版本，以及 Xcode Command Line Tools。
@@ -26,6 +30,9 @@
 ```bash
 swift test
 ./scripts/build-app.sh /path/to/output
+./scripts/build-dmg.sh /path/to/output
 ```
+
+`build-app.sh` 默认生成同时支持 Apple Silicon 与 Intel 的通用应用。设置 `CODE_SIGN_IDENTITY` 后可使用 Developer ID 正式签名；未设置时生成适合本地与朋友测试的临时签名版本。
 
 项目通过 Codex 官方 `app-server` 的 `account/rateLimits/read` 方法读取额度。应用启动一个本地 Codex 子进程，并按官方要求完成初始化握手。
