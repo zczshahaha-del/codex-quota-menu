@@ -29,11 +29,11 @@ private struct QuotaPanel: View {
     @ObservedObject var model: QuotaViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Codex 额度")
-                        .font(.headline)
+                        .font(.title3.weight(.semibold))
                     if let planType = model.snapshot?.planType {
                         Text(planType.uppercased())
                             .font(.caption)
@@ -54,17 +54,27 @@ private struct QuotaPanel: View {
                 }
             }
 
-            if let snapshot = model.snapshot {
-                ForEach(snapshot.allBuckets) { bucket in
-                    BucketView(bucket: bucket)
-                    if bucket.id != snapshot.allBuckets.last?.id {
-                        Divider()
-                    }
-                }
+            if let window = model.snapshot?.main.primary {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Codex")
+                        .font(.headline)
 
-                Text("更新于 \(snapshot.fetchedAt.formatted(date: .omitted, time: .shortened))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(window.windowName)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("剩余 \(window.remainingPercent)%")
+                            .font(.system(.title3, design: .rounded).weight(.semibold))
+                            .monospacedDigit()
+                    }
+
+                    QuotaProgressView(remainingPercent: window.remainingPercent)
+
+                    Text("\(QuotaFormatter.resetDetail(until: window.resetsAt)) 重置")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             } else if let error = model.errorMessage {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("暂时无法读取额度")
@@ -79,57 +89,66 @@ private struct QuotaPanel: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
+        }
+        .padding(18)
+        .modifier(GlassCardModifier())
+        .padding(8)
+        .frame(width: 300)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button {
+                model.refresh()
+            } label: {
+                Label("立即刷新", systemImage: "arrow.clockwise")
+            }
+                .disabled(model.isRefreshing)
 
             Divider()
 
-            HStack {
-                Button {
-                    model.refresh()
-                } label: {
-                    Label("刷新", systemImage: "arrow.clockwise")
-                }
-                .disabled(model.isRefreshing)
-
-                Spacer()
-
-                Button("退出") {
-                    model.stop()
-                    NSApplication.shared.terminate(nil)
-                }
+            Button("退出") {
+                model.stop()
+                NSApplication.shared.terminate(nil)
             }
         }
-        .padding(14)
-        .frame(width: 286)
     }
 }
 
-private struct BucketView: View {
-    let bucket: QuotaBucket
+private struct QuotaProgressView: View {
+    let remainingPercent: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(bucket.name)
-                .font(.subheadline.weight(.medium))
-
-            ForEach(Array(bucket.windows.enumerated()), id: \.offset) { _, window in
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(window.windowName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("剩余 \(window.remainingPercent)%")
-                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                            .monospacedDigit()
-                    }
-
-                    ProgressView(value: Double(window.remainingPercent), total: 100)
-
-                    Text("\(QuotaFormatter.resetDetail(until: window.resetsAt)) 重置")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.primary.opacity(0.12))
+                Capsule()
+                    .fill(Color.accentColor)
+                    .frame(width: proxy.size.width * CGFloat(remainingPercent) / 100)
             }
+        }
+        .frame(height: 7)
+        .accessibilityElement()
+        .accessibilityLabel("额度剩余")
+        .accessibilityValue("\(remainingPercent)%")
+    }
+}
+
+private struct GlassCardModifier: ViewModifier {
+    private let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content
+                .glassEffect(.regular, in: shape)
+        } else {
+            content
+                .background(.ultraThinMaterial, in: shape)
+                .overlay {
+                    shape
+                        .stroke(.white.opacity(0.16), lineWidth: 0.75)
+                }
+                .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
         }
     }
 }

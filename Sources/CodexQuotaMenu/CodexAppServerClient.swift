@@ -127,7 +127,7 @@ final class CodexAppServerClient {
                 "clientInfo": [
                     "name": "codex_quota_menu",
                     "title": "Codex Quota Menu",
-                    "version": "0.1.0",
+                    "version": "0.2.0",
                 ],
             ],
         ])
