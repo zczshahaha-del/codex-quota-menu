@@ -94,6 +94,7 @@ private struct QuotaPanel: View {
         .modifier(GlassCardModifier())
         .padding(8)
         .frame(width: 300)
+        .background(WindowSurfaceConfigurator())
         .contentShape(Rectangle())
         .contextMenu {
             Button {
@@ -135,20 +136,57 @@ private struct QuotaProgressView: View {
 
 private struct GlassCardModifier: ViewModifier {
     private let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+    private let edgeHighlight = LinearGradient(
+        colors: [
+            .white.opacity(0.52),
+            .white.opacity(0.18),
+            .white.opacity(0.08),
+            .white.opacity(0.28),
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *) {
             content
-                .glassEffect(.regular, in: shape)
+                .glassEffect(.regular.tint(.white.opacity(0.07)), in: shape)
+                .overlay {
+                    shape.stroke(edgeHighlight, lineWidth: 0.9)
+                }
+                .shadow(color: .black.opacity(0.28), radius: 20, y: 8)
         } else {
             content
                 .background(.ultraThinMaterial, in: shape)
                 .overlay {
-                    shape
-                        .stroke(.white.opacity(0.16), lineWidth: 0.75)
+                    shape.stroke(edgeHighlight, lineWidth: 0.9)
                 }
-                .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
+                .shadow(color: .black.opacity(0.28), radius: 20, y: 8)
+        }
+    }
+}
+
+private struct WindowSurfaceConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        configureWindow(for: view)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        configureWindow(for: view)
+    }
+
+    private func configureWindow(for view: NSView) {
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = false
+
+            window.contentView?.wantsLayer = true
+            window.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
         }
     }
 }
