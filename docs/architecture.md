@@ -1,6 +1,6 @@
 # 项目结构
 
-应用使用 SwiftUI `MenuBarExtra` 构建菜单栏界面，最低支持 macOS 13。
+应用使用 AppKit `NSStatusItem` 提供菜单栏入口，并用透明、无边框 `NSPanel` 承载 SwiftUI 额度卡片，最低支持 macOS 13。这样可以避免系统弹窗与玻璃卡片形成双层背景。
 
 ## 数据流程
 
