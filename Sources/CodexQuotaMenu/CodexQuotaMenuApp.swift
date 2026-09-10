@@ -71,6 +71,12 @@ private final class StatusBarController: NSObject {
     private func configurePanel() {
         let hostingView = NSHostingView(rootView: QuotaPanel(model: model))
         hostingView.sizingOptions = [.intrinsicContentSize]
+        hostingView.wantsLayer = true
+        hostingView.layer?.isOpaque = false
+        hostingView.layer?.backgroundColor = NSColor.clear.cgColor
+        hostingView.layer?.cornerRadius = 22
+        hostingView.layer?.cornerCurve = .continuous
+        hostingView.layer?.masksToBounds = true
 
         let panel = NSPanel(
             contentRect: .zero,
@@ -253,8 +259,8 @@ private struct QuotaPanel: View {
         }
         .padding(15)
         .modifier(GlassCardModifier())
-        .padding(6)
-        .frame(width: 276)
+        .frame(width: 264)
+        .background(Color.clear)
         .contentShape(Rectangle())
         .contextMenu {
             Button {
@@ -296,33 +302,24 @@ private struct QuotaProgressView: View {
 
 private struct GlassCardModifier: ViewModifier {
     private let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-    private let edgeHighlight = LinearGradient(
-        colors: [
-            .white.opacity(0.52),
-            .white.opacity(0.18),
-            .white.opacity(0.08),
-            .white.opacity(0.28),
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *) {
             content
-                .glassEffect(.regular.tint(.white.opacity(0.07)), in: shape)
+                .background(.black.opacity(0.24), in: shape)
+                .glassEffect(.clear, in: shape)
                 .overlay {
-                    shape.stroke(edgeHighlight, lineWidth: 0.9)
+                    shape.stroke(.white.opacity(0.18), lineWidth: 0.7)
                 }
-                .shadow(color: .black.opacity(0.26), radius: 8, y: 3)
+                .clipShape(shape)
         } else {
             content
                 .background(.ultraThinMaterial, in: shape)
                 .overlay {
-                    shape.stroke(edgeHighlight, lineWidth: 0.9)
+                    shape.stroke(.white.opacity(0.18), lineWidth: 0.7)
                 }
-                .shadow(color: .black.opacity(0.26), radius: 8, y: 3)
+                .clipShape(shape)
         }
     }
 }
