@@ -10,6 +10,6 @@
 3. 通过逐行 JSON-RPC 完成 `initialize` 与 `initialized` 握手。
 4. 调用 `account/rateLimits/read`。
 5. 解析 `rateLimitsByLimitId`，以 `codex` 桶作为菜单栏主数字。
-6. 收到 `account/rateLimits/updated` 通知或到达五分钟刷新周期时重新读取。
+6. 收到 `account/rateLimits/updated` 通知或到达一分钟刷新周期时重新读取。
 
 应用不直接读取 `~/.codex` 中的凭据文件。身份验证由 Codex 子进程使用现有登录状态完成。
