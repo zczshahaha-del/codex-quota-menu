@@ -127,7 +127,7 @@ final class CodexAppServerClient {
                 "clientInfo": [
                     "name": "codex_quota_menu",
                     "title": "Codex Quota Menu",
-                    "version": "0.3.3",
+                    "version": "0.3.4",
                 ],
             ],
         ])
@@ -224,27 +224,32 @@ final class CodexAppServerClient {
         onError?(message)
     }
 
-    private static func findCodexExecutable() -> URL? {
+    static func findCodexExecutable(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
+    ) -> URL? {
         var candidates: [String] = []
 
-        if let override = ProcessInfo.processInfo.environment["CODEX_BINARY"], !override.isEmpty {
+        if let override = environment["CODEX_BINARY"], !override.isEmpty {
             candidates.append(override)
         }
 
         candidates.append(contentsOf: [
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
             "/Applications/ChatGPT.app/Contents/Resources/codex",
+            "/Applications/Codex.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
             "/Applications/Codex.app/Contents/Resources/codex",
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex",
         ])
 
-        if let path = ProcessInfo.processInfo.environment["PATH"] {
+        if let path = environment["PATH"] {
             candidates.append(contentsOf: path
                 .split(separator: ":")
                 .map { String($0) + "/codex" })
         }
 
-        for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
+        for path in candidates where isExecutable(path) {
             return URL(fileURLWithPath: path)
         }
 
