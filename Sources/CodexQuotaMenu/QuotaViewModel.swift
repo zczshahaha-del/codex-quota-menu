@@ -35,20 +35,30 @@ final class QuotaViewModel: ObservableObject {
         }
     }
 
+    var displayWindow: QuotaWindow? {
+        snapshot?.main.primary ?? snapshot?.main.secondary
+    }
+
+    var isStale: Bool {
+        snapshot != nil && (errorMessage != nil || !isConnected)
+    }
+
     var menuBarTitle: String {
-        guard let window = snapshot?.main.primary else {
+        guard let window = displayWindow else {
             return isRefreshing ? "…" : "--%·--"
         }
 
-        return "\(window.remainingPercent)%·\(QuotaFormatter.compactReset(until: window.resetsAt))"
+        let warning = isStale ? "⚠︎ " : ""
+        return "\(warning)\(window.remainingPercent)%·\(QuotaFormatter.compactReset(until: window.resetsAt))"
     }
 
     var accessibilityStatus: String {
-        guard let window = snapshot?.main.primary else {
+        guard let window = displayWindow else {
             return errorMessage ?? "正在读取 Codex 额度"
         }
 
-        return "Codex 剩余 \(window.remainingPercent)%，\(QuotaFormatter.compactReset(until: window.resetsAt)) 后重置"
+        let warning = isStale ? "额度可能已过期。\(errorMessage ?? "连接已断开")。上次读取：" : ""
+        return "\(warning)Codex 剩余 \(window.remainingPercent)%，\(QuotaFormatter.compactReset(until: window.resetsAt)) 后重置"
     }
 
     func start() {
@@ -66,13 +76,13 @@ final class QuotaViewModel: ObservableObject {
 
     func refresh() {
         isRefreshing = true
-        errorMessage = nil
         client.refresh()
     }
 
     func stop() {
         refreshTimer?.invalidate()
         refreshTimer = nil
+        started = false
         client.stop()
     }
 
