@@ -219,6 +219,20 @@ private struct QuotaPanel: View {
                         .frame(width: 7, height: 7)
                         .accessibilityLabel(model.isConnected ? "已连接" : "未连接")
                 }
+
+                Menu {
+                    menuActions
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("更多操作：立即刷新、退出")
+                .accessibilityLabel("更多操作")
             }
 
             if let window = model.snapshot?.main.primary {
@@ -263,19 +277,24 @@ private struct QuotaPanel: View {
         .background(Color.clear)
         .contentShape(Rectangle())
         .contextMenu {
-            Button {
-                model.refresh()
-            } label: {
-                Label("立即刷新", systemImage: "arrow.clockwise")
-            }
-                .disabled(model.isRefreshing)
+            menuActions
+        }
+    }
 
-            Divider()
+    @ViewBuilder
+    private var menuActions: some View {
+        Button {
+            model.refresh()
+        } label: {
+            Label("立即刷新", systemImage: "arrow.clockwise")
+        }
+        .disabled(model.isRefreshing)
 
-            Button("退出") {
-                model.stop()
-                NSApplication.shared.terminate(nil)
-            }
+        Divider()
+
+        Button("退出") {
+            model.stop()
+            NSApplication.shared.terminate(nil)
         }
     }
 }
