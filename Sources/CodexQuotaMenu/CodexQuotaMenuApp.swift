@@ -215,13 +215,34 @@ private struct QuotaPanel: View {
                         .controlSize(.small)
                 } else {
                     Circle()
-                        .fill(model.isConnected ? Color.green : Color.orange)
+                        .fill(model.isConnected && model.errorMessage == nil ? Color.green : Color.orange)
                         .frame(width: 7, height: 7)
-                        .accessibilityLabel(model.isConnected ? "已连接" : "未连接")
+                        .accessibilityLabel(model.errorMessage != nil ? "读取失败" : (model.isConnected ? "已连接" : "未连接"))
                 }
+
+                Menu {
+                    menuActions
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("更多操作：立即刷新、退出")
+                .accessibilityLabel("更多操作")
             }
 
-            if let window = model.snapshot?.main.primary {
+            if model.isStale {
+                Label("额度可能已过期，以下为上次读取结果", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let window = model.displayWindow {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Codex")
                         .font(.headline)
@@ -242,7 +263,9 @@ private struct QuotaPanel: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-            } else if let error = model.errorMessage {
+            }
+
+            if let error = model.errorMessage {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("暂时无法读取额度")
                         .font(.subheadline.weight(.medium))
@@ -251,7 +274,7 @@ private struct QuotaPanel: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            } else {
+            } else if model.displayWindow == nil {
                 Text("正在连接 Codex…")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -263,19 +286,24 @@ private struct QuotaPanel: View {
         .background(Color.clear)
         .contentShape(Rectangle())
         .contextMenu {
-            Button {
-                model.refresh()
-            } label: {
-                Label("立即刷新", systemImage: "arrow.clockwise")
-            }
-                .disabled(model.isRefreshing)
+            menuActions
+        }
+    }
 
-            Divider()
+    @ViewBuilder
+    private var menuActions: some View {
+        Button {
+            model.refresh()
+        } label: {
+            Label("立即刷新", systemImage: "arrow.clockwise")
+        }
+        .disabled(model.isRefreshing)
 
-            Button("退出") {
-                model.stop()
-                NSApplication.shared.terminate(nil)
-            }
+        Divider()
+
+        Button("退出") {
+            model.stop()
+            NSApplication.shared.terminate(nil)
         }
     }
 }

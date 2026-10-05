@@ -14,9 +14,20 @@ final class CodexAppServerClient {
     private var errorBuffer = Data()
     private var initialized = false
     private var initializeRequestID: Int?
-    private var rateLimitRequestIDs = Set<Int>()
+    private var rateLimitRequestID: Int?
     private var nextRequestID = 1
-    private var stopping = false
+    private var connectionID: UUID?
+    private var requestDeadline: DispatchWorkItem?
+    private let executableProvider: () -> URL?
+    private let requestTimeout: TimeInterval
+
+    init(
+        executableProvider: @escaping () -> URL? = { CodexAppServerClient.findCodexExecutable() },
+        requestTimeout: TimeInterval = 20
+    ) {
+        self.executableProvider = executableProvider
+        self.requestTimeout = requestTimeout
+    }
 
     func start() {
         queue.async { [weak self] in
@@ -37,22 +48,15 @@ final class CodexAppServerClient {
 
     func stop() {
         queue.sync {
-            stopping = true
-            outputHandle?.readabilityHandler = nil
-            errorHandle?.readabilityHandler = nil
-            inputHandle?.closeFile()
-            if let process, process.isRunning {
-                process.terminate()
-            }
             clearProcessLocked()
+            onConnectionChanged?(false)
         }
     }
 
     private func startLocked() {
         guard process == nil else { return }
-        stopping = false
 
-        guard let codexURL = Self.findCodexExecutable() else {
+        guard let codexURL = executableProvider() else {
             reportError("找不到 Codex。请先安装或打开 ChatGPT/Codex 应用。")
             return
         }
@@ -61,6 +65,8 @@ final class CodexAppServerClient {
         let inputPipe = Pipe()
         let outputPipe = Pipe()
         let errorPipe = Pipe()
+        let connectionID = UUID()
+        self.connectionID = connectionID
 
         process.executableURL = codexURL
         process.arguments = ["app-server", "--stdio"]
@@ -79,6 +85,7 @@ final class CodexAppServerClient {
             let data = handle.availableData
             guard !data.isEmpty else { return }
             self?.queue.async {
+                guard self?.connectionID == connectionID else { return }
                 self?.consumeOutputLocked(data)
             }
         }
@@ -87,39 +94,35 @@ final class CodexAppServerClient {
             let data = handle.availableData
             guard !data.isEmpty else { return }
             self?.queue.async {
+                guard self?.connectionID == connectionID else { return }
                 self?.errorBuffer.append(data)
             }
         }
 
         process.terminationHandler = { [weak self] terminatedProcess in
             self?.queue.async {
-                guard let self else { return }
-                let shouldReport = !self.stopping && terminatedProcess.terminationStatus != 0
+                guard let self, self.connectionID == connectionID else { return }
                 let stderr = String(data: self.errorBuffer, encoding: .utf8)?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                self.clearProcessLocked()
-                self.onConnectionChanged?(false)
-
-                if shouldReport {
-                    self.reportError(stderr?.isEmpty == false ? stderr! : "Codex 后台连接已停止。")
-                }
+                let message = terminatedProcess.terminationStatus != 0 && stderr?.isEmpty == false
+                    ? stderr! : "Codex 后台连接已停止，请重试。"
+                self.failConnectionLocked(message)
             }
         }
 
         do {
             try process.run()
             self.process = process
-            onConnectionChanged?(true)
             sendInitializeLocked()
         } catch {
-            clearProcessLocked()
-            reportError("无法启动 Codex：\(error.localizedDescription)")
+            failConnectionLocked("无法启动 Codex：\(error.localizedDescription)")
         }
     }
 
     private func sendInitializeLocked() {
         let requestID = allocateRequestIDLocked()
         initializeRequestID = requestID
+        scheduleDeadlineLocked("连接 Codex 超时，请重试。")
         sendLocked([
             "method": "initialize",
             "id": requestID,
@@ -127,16 +130,18 @@ final class CodexAppServerClient {
                 "clientInfo": [
                     "name": "codex_quota_menu",
                     "title": "Codex Quota Menu",
-                    "version": "0.3.5",
+                    "version": "0.3.7",
                 ],
             ],
         ])
     }
 
     private func requestRateLimitsLocked() {
-        guard initialized else { return }
+        // Only one read can be outstanding; a delayed response cannot overwrite a newer read.
+        guard initialized, rateLimitRequestID == nil else { return }
         let requestID = allocateRequestIDLocked()
-        rateLimitRequestIDs.insert(requestID)
+        rateLimitRequestID = requestID
+        scheduleDeadlineLocked("读取额度超时，请重试。")
         sendLocked([
             "method": "account/rateLimits/read",
             "id": requestID,
@@ -156,7 +161,7 @@ final class CodexAppServerClient {
             data.append(0x0A)
             try inputHandle.write(contentsOf: data)
         } catch {
-            reportError("发送 Codex 请求失败：\(error.localizedDescription)")
+            failConnectionLocked("发送 Codex 请求失败：\(error.localizedDescription)")
         }
     }
 
@@ -178,19 +183,27 @@ final class CodexAppServerClient {
 
     private func handleMessageLocked(_ message: [String: Any]) {
         if let id = Self.integer(message["id"]), id == initializeRequestID {
+            cancelDeadlineLocked()
             initializeRequestID = nil
             if let error = Self.errorMessage(from: message) {
-                reportError(error)
+                failConnectionLocked(error)
+                return
+            }
+            guard message["result"] is [String: Any] else {
+                failConnectionLocked("Codex 返回了无法识别的初始化结果。")
                 return
             }
 
             initialized = true
+            onConnectionChanged?(true)
             sendLocked(["method": "initialized", "params": [:]])
             requestRateLimitsLocked()
             return
         }
 
-        if let id = Self.integer(message["id"]), rateLimitRequestIDs.remove(id) != nil {
+        if let id = Self.integer(message["id"]), id == rateLimitRequestID {
+            cancelDeadlineLocked()
+            rateLimitRequestID = nil
             if let result = message["result"] as? [String: Any] {
                 onRateLimits?(result)
             } else if let error = Self.errorMessage(from: message) {
@@ -207,17 +220,47 @@ final class CodexAppServerClient {
     }
 
     private func clearProcessLocked() {
+        connectionID = nil
+        cancelDeadlineLocked()
+        process?.terminationHandler = nil
         outputHandle?.readabilityHandler = nil
         errorHandle?.readabilityHandler = nil
+        inputHandle?.closeFile()
+        if let process, process.isRunning { process.terminate() }
         inputHandle = nil
         outputHandle = nil
         errorHandle = nil
         process = nil
         initialized = false
         initializeRequestID = nil
-        rateLimitRequestIDs.removeAll()
+        rateLimitRequestID = nil
         outputBuffer.removeAll(keepingCapacity: false)
         errorBuffer.removeAll(keepingCapacity: false)
+    }
+
+    private func failConnectionLocked(_ message: String) {
+        clearProcessLocked()
+        onConnectionChanged?(false)
+        reportError(message)
+    }
+
+    private func scheduleDeadlineLocked(_ message: String) {
+        cancelDeadlineLocked()
+        let connectionID = self.connectionID
+        let requestID = initializeRequestID ?? rateLimitRequestID
+        let deadline = DispatchWorkItem { [weak self] in
+            guard let self, self.connectionID == connectionID,
+                  (self.initializeRequestID ?? self.rateLimitRequestID) == requestID
+            else { return }
+            self.failConnectionLocked(message)
+        }
+        requestDeadline = deadline
+        queue.asyncAfter(deadline: .now() + requestTimeout, execute: deadline)
+    }
+
+    private func cancelDeadlineLocked() {
+        requestDeadline?.cancel()
+        requestDeadline = nil
     }
 
     private func reportError(_ message: String) {
