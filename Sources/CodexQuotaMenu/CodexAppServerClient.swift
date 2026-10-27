@@ -3,7 +3,6 @@ import Foundation
 final class CodexAppServerClient {
     var onRateLimits: (([String: Any]) -> Void)?
     var onError: ((String) -> Void)?
-    var onConnectionChanged: ((Bool) -> Void)?
 
     private let queue = DispatchQueue(label: "codex-quota.app-server")
     private var process: Process?
@@ -12,6 +11,7 @@ final class CodexAppServerClient {
     private var errorHandle: FileHandle?
     private var outputBuffer = Data()
     private var errorBuffer = Data()
+    private static let maximumErrorBufferSize = 64 * 1024
     private var initialized = false
     private var initializeRequestID: Int?
     private var rateLimitRequestID: Int?
@@ -49,7 +49,6 @@ final class CodexAppServerClient {
     func stop() {
         queue.sync {
             clearProcessLocked()
-            onConnectionChanged?(false)
         }
     }
 
@@ -95,17 +94,17 @@ final class CodexAppServerClient {
             guard !data.isEmpty else { return }
             self?.queue.async {
                 guard self?.connectionID == connectionID else { return }
-                self?.errorBuffer.append(data)
+                self?.appendErrorLocked(data)
             }
         }
 
         process.terminationHandler = { [weak self] terminatedProcess in
             self?.queue.async {
                 guard let self, self.connectionID == connectionID else { return }
-                let stderr = String(data: self.errorBuffer, encoding: .utf8)?
+                let stderr = String(decoding: self.errorBuffer, as: UTF8.self)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                let message = terminatedProcess.terminationStatus != 0 && stderr?.isEmpty == false
-                    ? stderr! : "Codex 后台连接已停止，请重试。"
+                let message = terminatedProcess.terminationStatus != 0 && !stderr.isEmpty
+                    ? stderr : "Codex 后台连接已停止，请重试。"
                 self.failConnectionLocked(message)
             }
         }
@@ -130,10 +129,21 @@ final class CodexAppServerClient {
                 "clientInfo": [
                     "name": "codex_quota_menu",
                     "title": "Codex Quota Menu",
-                    "version": "0.3.7",
+                    "version": "0.4.2",
                 ],
             ],
         ])
+    }
+
+    private func appendErrorLocked(_ data: Data) {
+        let limit = Self.maximumErrorBufferSize
+        if data.count >= limit {
+            errorBuffer = Data(data.suffix(limit))
+        } else {
+            let excess = errorBuffer.count + data.count - limit
+            if excess > 0 { errorBuffer.removeFirst(excess) }
+            errorBuffer.append(data)
+        }
     }
 
     private func requestRateLimitsLocked() {
@@ -195,7 +205,6 @@ final class CodexAppServerClient {
             }
 
             initialized = true
-            onConnectionChanged?(true)
             sendLocked(["method": "initialized", "params": [:]])
             requestRateLimitsLocked()
             return
@@ -240,7 +249,6 @@ final class CodexAppServerClient {
 
     private func failConnectionLocked(_ message: String) {
         clearProcessLocked()
-        onConnectionChanged?(false)
         reportError(message)
     }
 

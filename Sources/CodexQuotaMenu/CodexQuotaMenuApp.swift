@@ -213,11 +213,6 @@ private struct QuotaPanel: View {
                 if model.isRefreshing {
                     ProgressView()
                         .controlSize(.small)
-                } else {
-                    Circle()
-                        .fill(model.isConnected && model.errorMessage == nil ? Color.green : Color.orange)
-                        .frame(width: 7, height: 7)
-                        .accessibilityLabel(model.errorMessage != nil ? "读取失败" : (model.isConnected ? "已连接" : "未连接"))
                 }
 
                 Menu {
@@ -233,13 +228,6 @@ private struct QuotaPanel: View {
                 .fixedSize()
                 .help("更多操作：立即刷新、退出")
                 .accessibilityLabel("更多操作")
-            }
-
-            if model.isStale {
-                Label("额度可能已过期，以下为上次读取结果", systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let window = model.displayWindow {
@@ -265,20 +253,31 @@ private struct QuotaPanel: View {
                 }
             }
 
-            if let error = model.errorMessage {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("暂时无法读取额度")
-                        .font(.subheadline.weight(.medium))
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            } else if model.displayWindow == nil {
-                Text("正在连接 Codex…")
+            if model.displayWindow == nil {
+                Text(model.isRefreshing ? "正在连接 Codex…" : "--%")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("今日已用")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(model.todayTokenSummary)
+                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                        .monospacedDigit()
+                }
+                Text(model.todayTokenDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .help(model.todayTokenHelp)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("今日已用 token")
+            .accessibilityValue(model.todayTokenHelp)
         }
         .padding(15)
         .modifier(GlassCardModifier())
