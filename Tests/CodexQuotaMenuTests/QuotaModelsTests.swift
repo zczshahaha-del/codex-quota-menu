@@ -28,7 +28,7 @@ final class QuotaModelsTests: XCTestCase {
         )
     }
 
-    func testParserReadsMainAndAdditionalBuckets() throws {
+    func testParserSelectsMainBucketWithUnrelatedModelsPresent() throws {
         let result: [String: Any] = [
             "rateLimits": [
                 "limitId": "codex",
@@ -69,9 +69,35 @@ final class QuotaModelsTests: XCTestCase {
         let snapshot = try XCTUnwrap(RateLimitParser.parse(result: result))
         XCTAssertEqual(snapshot.main.primary?.remainingPercent, 77)
         XCTAssertEqual(snapshot.planType, "pro")
-        XCTAssertEqual(snapshot.additional.first?.name, "GPT-5.3-Codex-Spark")
-        XCTAssertEqual(snapshot.additional.first?.windows.count, 2)
-        XCTAssertEqual(snapshot.additional.first?.primary?.windowName, "5 小时额度")
+        XCTAssertEqual(snapshot.main.primary?.windowName, "7 天额度")
+    }
+
+    func testParserKeepsLegacyAndSecondaryWindowFallback() throws {
+        let window: [String: Any] = ["usedPercent": 42, "windowDurationMins": 300, "resetsAt": 1789468386]
+        let snapshot = try XCTUnwrap(RateLimitParser.parse(result: ["rateLimits": ["secondary": window, "planType": "pro"]]))
+        XCTAssertNil(snapshot.main.primary)
+        XCTAssertEqual(snapshot.main.secondary?.remainingPercent, 58)
+        XCTAssertEqual(snapshot.planType, "pro")
+    }
+
+    func testInvalidMainBucketFallsBackToLegacy() throws {
+        let window: [String: Any] = ["usedPercent": 10, "windowDurationMins": 300, "resetsAt": 1789468386]
+        let snapshot = try XCTUnwrap(RateLimitParser.parse(result: [
+            "rateLimitsByLimitId": ["codex": ["primary": [:]]], "rateLimits": ["primary": window],
+        ]))
+        XCTAssertEqual(snapshot.main.primary?.remainingPercent, 90)
+    }
+
+    func testAlternateMapKeyCanStillIdentifyMainBucket() throws {
+        let window: [String: Any] = ["usedPercent": 10, "windowDurationMins": 300, "resetsAt": 1789468386]
+        let snapshot = try XCTUnwrap(RateLimitParser.parse(result: ["rateLimitsByLimitId": ["alias": ["limitId": "codex", "primary": window]]]))
+        XCTAssertEqual(snapshot.main.primary?.remainingPercent, 90)
+    }
+
+    func testMissingMainBucketUsesAvailableFallback() throws {
+        let window: [String: Any] = ["usedPercent": 10, "windowDurationMins": 300, "resetsAt": 1789468386]
+        let snapshot = try XCTUnwrap(RateLimitParser.parse(result: ["rateLimitsByLimitId": ["other": ["secondary": window]]]))
+        XCTAssertEqual(snapshot.main.secondary?.remainingPercent, 90)
     }
 
     private func date(

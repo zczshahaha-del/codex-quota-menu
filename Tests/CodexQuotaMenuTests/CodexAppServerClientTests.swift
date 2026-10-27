@@ -49,17 +49,15 @@ final class CodexAppServerClientTests: XCTestCase {
         """)
         let client = CodexAppServerClient(executableProvider: { executable })
         defer { client.stop() }
-        let connected = expectation(description: "connected")
         let quota = expectation(description: "quota")
         quota.assertForOverFulfill = false
-        client.onConnectionChanged = { if $0 { connected.fulfill() } }
         client.onRateLimits = { _ in quota.fulfill() }
         client.start()
-        wait(for: [connected], timeout: 2)
         let deadline = Date().addingTimeInterval(2)
         while !FileManager.default.fileExists(atPath: executable.path + ".requests"), Date() < deadline {
             Thread.sleep(forTimeInterval: 0.01)
         }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: executable.path + ".requests"))
         client.refresh()
         client.refresh()
         wait(for: [quota], timeout: 2)
@@ -135,6 +133,24 @@ final class CodexAppServerClientTests: XCTestCase {
         client.start()
         wait(for: [latest], timeout: 2)
         wait(for: [extra], timeout: 0.3)
+    }
+
+    func testLargeStderrKeepsOnlyRecentTailAndHandlesSplitUTF8() throws {
+        let executable = try fixture("""
+        /usr/bin/awk 'BEGIN { for (i=0; i<40000; i++) printf "中文日志"; printf "尾部标记" }' >&2
+        sleep 0.05
+        exit 1
+        """)
+        let client = CodexAppServerClient(executableProvider: { executable })
+        defer { client.stop() }
+        let failed = expectation(description: "bounded stderr")
+        client.onError = { message in
+            XCTAssertTrue(message.hasSuffix("尾部标记"))
+            XCTAssertLessThanOrEqual(message.utf8.count, 64 * 1024 + 3)
+            failed.fulfill()
+        }
+        client.start()
+        wait(for: [failed], timeout: 3)
     }
 
     private func fixture(_ body: String) throws -> URL {

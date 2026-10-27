@@ -25,26 +25,14 @@ struct QuotaWindow: Equatable {
     }
 }
 
-struct QuotaBucket: Equatable, Identifiable {
-    let id: String
-    let name: String
+struct QuotaBucket: Equatable {
     let primary: QuotaWindow?
     let secondary: QuotaWindow?
-
-    var windows: [QuotaWindow] {
-        [primary, secondary].compactMap { $0 }
-    }
 }
 
 struct QuotaSnapshot: Equatable {
     let main: QuotaBucket
-    let additional: [QuotaBucket]
     let planType: String?
-    let fetchedAt: Date
-
-    var allBuckets: [QuotaBucket] {
-        [main] + additional
-    }
 }
 
 enum QuotaFormatter {
@@ -81,64 +69,33 @@ enum QuotaFormatter {
 }
 
 enum RateLimitParser {
-    static func parse(result: [String: Any], fetchedAt: Date = Date()) -> QuotaSnapshot? {
+    static func parse(result: [String: Any]) -> QuotaSnapshot? {
         let legacy = result["rateLimits"] as? [String: Any]
         let bucketMap = result["rateLimitsByLimitId"] as? [String: Any]
 
-        var parsed: [QuotaBucket] = []
-        if let bucketMap {
-            for (key, rawValue) in bucketMap {
-                guard let rawBucket = rawValue as? [String: Any],
-                      let bucket = parseBucket(key: key, object: rawBucket)
-                else { continue }
-                parsed.append(bucket)
+        // Select only the displayed bucket; do not build unused model lists.
+        let codex = bucketMap?["codex"] as? [String: Any]
+            ?? bucketMap?.values.lazy.compactMap { $0 as? [String: Any] }.first { $0["limitId"] as? String == "codex" }
+        for candidate in [codex, legacy] {
+            if let object = candidate, let main = parseBucket(object) {
+                return QuotaSnapshot(main: main, planType: legacy?["planType"] as? String ?? object["planType"] as? String)
             }
         }
-
-        let main: QuotaBucket?
-        if let codex = parsed.first(where: { $0.id == "codex" }) {
-            main = codex
-        } else if let legacy {
-            main = parseBucket(key: "codex", object: legacy)
-        } else {
-            main = parsed.first
+        // Keep a deterministic fallback when the main bucket is unavailable.
+        for key in bucketMap?.keys.sorted() ?? [] {
+            if let object = bucketMap?[key] as? [String: Any], let main = parseBucket(object) {
+                return QuotaSnapshot(main: main, planType: object["planType"] as? String)
+            }
         }
-
-        guard let main, !main.windows.isEmpty else { return nil }
-
-        let planType = (legacy?["planType"] as? String)
-            ?? (bucketMap?["codex"] as? [String: Any])?["planType"] as? String
-
-        let additional = parsed
-            .filter { $0.id != main.id && !$0.windows.isEmpty }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-
-        return QuotaSnapshot(
-            main: main,
-            additional: additional,
-            planType: planType,
-            fetchedAt: fetchedAt
-        )
+        return nil
     }
 
-    private static func parseBucket(key: String, object: [String: Any]) -> QuotaBucket? {
-        let id = object["limitId"] as? String ?? key
-        let rawName = object["limitName"] as? String
-        let name: String
-
-        if let rawName, !rawName.isEmpty {
-            name = rawName
-        } else if id == "codex" {
-            name = "Codex"
-        } else {
-            name = id
-        }
-
+    private static func parseBucket(_ object: [String: Any]) -> QuotaBucket? {
         let primary = parseWindow(object["primary"] as? [String: Any])
         let secondary = parseWindow(object["secondary"] as? [String: Any])
 
         guard primary != nil || secondary != nil else { return nil }
-        return QuotaBucket(id: id, name: name, primary: primary, secondary: secondary)
+        return QuotaBucket(primary: primary, secondary: secondary)
     }
 
     private static func parseWindow(_ object: [String: Any]?) -> QuotaWindow? {
