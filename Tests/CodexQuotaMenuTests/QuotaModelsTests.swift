@@ -2,7 +2,7 @@ import XCTest
 @testable import CodexQuotaMenu
 
 final class QuotaModelsTests: XCTestCase {
-    func testCompactResetUsesCalendarDayDistance() {
+    func testCompactResetUsesElapsedDays() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
 
@@ -10,7 +10,7 @@ final class QuotaModelsTests: XCTestCase {
         let reset = date(2026, 9, 15, 18, 33, calendar: calendar)
 
         XCTAssertEqual(
-            QuotaFormatter.compactReset(until: reset, now: now, calendar: calendar),
+            QuotaFormatter.compactReset(until: reset, now: now),
             "6d"
         )
     }
@@ -23,9 +23,21 @@ final class QuotaModelsTests: XCTestCase {
         let reset = date(2026, 9, 9, 22, 29, calendar: calendar)
 
         XCTAssertEqual(
-            QuotaFormatter.compactReset(until: reset, now: now, calendar: calendar),
+            QuotaFormatter.compactReset(until: reset, now: now),
             "6h"
         )
+    }
+
+    func testResetDaysCountFull24HoursInsteadOfCalendarDates() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let now = date(2026, 11, 11, 16, 0, calendar: calendar)
+        let reset = date(2026, 11, 14, 1, 0, calendar: calendar)
+        XCTAssertEqual(QuotaFormatter.compactReset(until: reset, now: now), "2d")
+        XCTAssertEqual(QuotaFormatter.compactReset(until: now.addingTimeInterval(23 * 3600), now: now), "23h")
+        XCTAssertEqual(QuotaFormatter.compactReset(until: now.addingTimeInterval(48 * 3600), now: now), "2d")
+        XCTAssertEqual(QuotaFormatter.compactReset(until: now.addingTimeInterval(24 * 3600), now: now), "1d")
+        XCTAssertEqual(QuotaFormatter.compactReset(until: now, now: now), "now")
     }
 
     func testParserSelectsMainBucketWithUnrelatedModelsPresent() throws {

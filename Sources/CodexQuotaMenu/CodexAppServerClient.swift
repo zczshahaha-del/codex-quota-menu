@@ -18,26 +18,42 @@ final class CodexAppServerClient {
     private var nextRequestID = 1
     private var connectionID: UUID?
     private var requestDeadline: DispatchWorkItem?
+    private var reconnectTask: DispatchWorkItem?
+    private var reconnectID: UUID?
+    private var retryUsed = false
+    private var connectedAt: Date?
     private let executableProvider: () -> URL?
     private let requestTimeout: TimeInterval
+    private let reconnectDelay: TimeInterval
+    private let maximumConnectionAge: TimeInterval
 
     init(
         executableProvider: @escaping () -> URL? = { CodexAppServerClient.findCodexExecutable() },
-        requestTimeout: TimeInterval = 20
+        requestTimeout: TimeInterval = 20,
+        reconnectDelay: TimeInterval = 1,
+        maximumConnectionAge: TimeInterval = 300
     ) {
         self.executableProvider = executableProvider
         self.requestTimeout = requestTimeout
+        self.reconnectDelay = reconnectDelay
+        self.maximumConnectionAge = maximumConnectionAge
     }
 
     func start() {
         queue.async { [weak self] in
+            self?.retryUsed = false
             self?.startLocked()
         }
     }
 
-    func refresh() {
+    func refresh(reconnect: Bool = false) {
         queue.async { [weak self] in
             guard let self else { return }
+            let expired = self.connectedAt.map { Date().timeIntervalSince($0) >= self.maximumConnectionAge } ?? false
+            if reconnect || expired { self.clearProcessLocked() }
+            guard self.initializeRequestID == nil, self.rateLimitRequestID == nil else { return }
+            self.cancelReconnectLocked()
+            self.retryUsed = false
             if self.process == nil {
                 self.startLocked()
             } else if self.initialized {
@@ -112,6 +128,7 @@ final class CodexAppServerClient {
         do {
             try process.run()
             self.process = process
+            connectedAt = Date()
             sendInitializeLocked()
         } catch {
             failConnectionLocked("无法启动 Codex：\(error.localizedDescription)")
@@ -129,7 +146,7 @@ final class CodexAppServerClient {
                 "clientInfo": [
                     "name": "codex_quota_menu",
                     "title": "Codex Quota Menu",
-                    "version": "0.4.2",
+                    "version": "0.4.3",
                 ],
             ],
         ])
@@ -216,9 +233,9 @@ final class CodexAppServerClient {
             if let result = message["result"] as? [String: Any] {
                 onRateLimits?(result)
             } else if let error = Self.errorMessage(from: message) {
-                reportError(error)
+                failConnectionLocked(error)
             } else {
-                reportError("Codex 返回了无法识别的额度数据。")
+                failConnectionLocked("Codex 返回了无法识别的额度数据。")
             }
             return
         }
@@ -229,6 +246,8 @@ final class CodexAppServerClient {
     }
 
     private func clearProcessLocked() {
+        cancelReconnectLocked()
+        connectedAt = nil
         connectionID = nil
         cancelDeadlineLocked()
         process?.terminationHandler = nil
@@ -250,6 +269,24 @@ final class CodexAppServerClient {
     private func failConnectionLocked(_ message: String) {
         clearProcessLocked()
         reportError(message)
+        guard !retryUsed else { return }
+        retryUsed = true
+        let id = UUID()
+        reconnectID = id
+        let task = DispatchWorkItem { [weak self] in
+            guard let self, self.reconnectID == id else { return }
+            self.reconnectID = nil
+            self.reconnectTask = nil
+            self.startLocked()
+        }
+        reconnectTask = task
+        queue.asyncAfter(deadline: .now() + reconnectDelay, execute: task)
+    }
+
+    private func cancelReconnectLocked() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        reconnectID = nil
     }
 
     private func scheduleDeadlineLocked(_ message: String) {

@@ -34,6 +34,7 @@ private final class StatusBarController: NSObject {
     private var hostingView: NSHostingView<QuotaPanel>!
     private var modelObservation: AnyCancellable?
     private var outsideClickMonitor: Any?
+    private var wakeObserver: NSObjectProtocol?
     private var lastStatusItemInteraction = Date.distantPast
 
     override init() {
@@ -49,9 +50,16 @@ private final class StatusBarController: NSObject {
 
         updateStatusItem()
         model.start()
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.model.refresh() }
+        }
     }
 
     func stop() {
+        if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+        wakeObserver = nil
         removeOutsideClickMonitor()
         model.stop()
         panel?.close()
