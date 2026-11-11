@@ -38,18 +38,13 @@ struct QuotaSnapshot: Equatable {
 enum QuotaFormatter {
     static func compactReset(
         until resetDate: Date,
-        now: Date = Date(),
-        calendar: Calendar = .current
+        now: Date = Date()
     ) -> String {
         let seconds = resetDate.timeIntervalSince(now)
         guard seconds > 0 else { return "now" }
 
-        let start = calendar.startOfDay(for: now)
-        let end = calendar.startOfDay(for: resetDate)
-        let calendarDays = calendar.dateComponents([.day], from: start, to: end).day ?? 0
-
-        if calendarDays > 0 {
-            return "\(calendarDays)d"
+        if seconds >= 86_400 {
+            return "\(Int(seconds / 86_400))d"
         }
 
         if seconds >= 3_600 {

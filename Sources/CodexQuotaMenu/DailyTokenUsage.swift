@@ -126,6 +126,16 @@ final class DailyTokenUsageReader: DailyTokenUsageReading, @unchecked Sendable {
             day = interval
         }
 
+        do {
+            return try readFiles(interval: interval)
+        } catch {
+            // A move/deletion can invalidate a cached listing, even with preserved timestamps.
+            directories.removeAll()
+            return try readFiles(interval: interval)
+        }
+    }
+
+    private func readFiles(interval: DateInterval) throws -> DailyTokenUsage {
         let urls = try rolloutFiles()
         var needsAggregation = cachedUsage == nil || files.count != urls.count || urls.contains { files[$0] == nil }
         var current: [URL: FileState] = [:]

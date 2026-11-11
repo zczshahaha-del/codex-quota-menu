@@ -82,16 +82,18 @@ final class QuotaViewModel: ObservableObject {
         client.start()
         refreshTokenUsage()
 
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.refresh()
+                self?.refresh(reconnect: false)
             }
         }
+        refreshTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
-    func refresh() {
+    func refresh(reconnect: Bool = true) {
         isRefreshing = true
-        client.refresh()
+        client.refresh(reconnect: reconnect)
         refreshTokenUsage()
     }
 

@@ -115,6 +115,17 @@ final class DailyTokenUsageTests: XCTestCase {
         XCTAssertEqual(try read().usage.total, 360)
     }
 
+    func testStaleDirectoryListingIsDiscardedAfterReadError() throws {
+        let source = try write("sessions/a.jsonl", lines: [record("r1", time: "2026-10-08T01:00:00Z", input: 100, output: 10)])
+        XCTAssertEqual(try read().usage.total, 110)
+        let directory = source.deletingLastPathComponent()
+        let modified = try FileManager.default.attributesOfItem(atPath: directory.path)[.modificationDate]!
+        try FileManager.default.removeItem(at: source)
+        try write("sessions/b.jsonl", lines: [record("r2", time: "2026-10-08T02:00:00Z", input: 200, output: 20)])
+        try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: directory.path)
+        XCTAssertEqual(try read().usage.total, 220)
+    }
+
     func testForkIgnoresCopiedHistoryBeforeCreation() throws {
         try write("sessions/fork.jsonl", lines: [
             ["type": "session_meta", "payload": ["id": "fork", "timestamp": "2026-10-08T02:00:00Z", "forked_from_id": "parent"]],

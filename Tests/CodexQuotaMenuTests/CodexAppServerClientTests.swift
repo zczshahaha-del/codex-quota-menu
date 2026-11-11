@@ -65,6 +65,80 @@ final class CodexAppServerClientTests: XCTestCase {
         XCTAssertEqual(requests.split(separator: "\n").count, 1)
     }
 
+    func testReadErrorReconnectsAutomaticallyWithoutManualRefresh() throws {
+        let executable = try fixture("""
+        case "$line" in
+          *'"initialize"'*) printf '{"id":%s,"result":{}}\\n' "$id" ;;
+          *rateLimits*)
+            if [ ! -e "$0.failed" ]; then
+              touch "$0.failed"
+              printf '{"id":%s,"error":{"message":"stale connection"}}\\n' "$id"
+            else reply "$id" 75; fi ;;
+        esac
+        """)
+        let client = CodexAppServerClient(executableProvider: { executable })
+        defer { client.stop() }
+        let recovered = expectation(description: "automatic new connection")
+        client.onRateLimits = { result in
+            XCTAssertEqual(RateLimitParser.parse(result: result)?.main.primary?.remainingPercent, 25)
+            recovered.fulfill()
+        }
+        client.start()
+        wait(for: [recovered], timeout: 4)
+    }
+
+    func testExplicitRefreshAndConnectionAgeBothReplaceOldProcess() throws {
+        for force in [true, false] {
+            let executable = try fixture("""
+            case "$line" in
+              *'"initialize"'*) printf '{"id":%s,"result":{}}\\n' "$id" ;;
+              *rateLimits*)
+                if [ -z "$read_once" ]; then read_once=yes; reply "$id" 75
+                else reply "$id" 89; fi ;;
+            esac
+            """)
+            let client = CodexAppServerClient(executableProvider: { executable }, maximumConnectionAge: force ? 300 : 0)
+            let completed = expectation(description: "fresh process")
+            var count = 0
+            client.onRateLimits = { result in
+                count += 1
+                XCTAssertEqual(RateLimitParser.parse(result: result)?.main.primary?.remainingPercent, 25)
+                if count == 1 { client.refresh(reconnect: force) }
+                else { completed.fulfill() }
+            }
+            client.start()
+            wait(for: [completed], timeout: 3)
+            client.stop()
+        }
+    }
+
+    func testPersistentFailureRetriesOnlyOnceAndStopCancelsRetry() throws {
+        for stopAfterFirst in [false, true] {
+            let executable = try fixture("""
+            case "$line" in
+              *'"initialize"'*) printf '{"id":%s,"result":{}}\\n' "$id" ;;
+              *rateLimits*) printf '{"id":%s,"error":{"message":"offline"}}\\n' "$id" ;;
+            esac
+            """)
+            let client = CodexAppServerClient(executableProvider: { executable }, reconnectDelay: 0.1)
+            let expected = expectation(description: "bounded errors")
+            expected.expectedFulfillmentCount = stopAfterFirst ? 1 : 2
+            let extra = expectation(description: "no further retries")
+            extra.isInverted = true
+            var count = 0
+            client.onError = { _ in
+                count += 1
+                if count <= (stopAfterFirst ? 1 : 2) { expected.fulfill() }
+                else { extra.fulfill() }
+            }
+            client.start()
+            wait(for: [expected], timeout: 3)
+            if stopAfterFirst { client.stop() }
+            wait(for: [extra], timeout: 0.3)
+            client.stop()
+        }
+    }
+
     func testTimeoutAllowsRetryForInitializationAndQuotaRead() throws {
         for method in ["initialize", "rateLimits"] {
             let executable = try fixture("""
